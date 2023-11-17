@@ -1,0 +1,86 @@
+version: "3.9"
+
+networks:
+  internal:
+    name: internal
+    external: false
+
+services:
+  # bitcoin core 
+  bitcoin:
+    image: ruimarinho/bitcoin-core
+    restart: unless-stopped
+    ports:
+      - 18443:18443
+    volumes:
+      - bitcoin-regtest-data:/home/bitcoin/.bitcoin
+    networks:
+      - internal
+    command:
+      -printtoconsole
+      -txindex=1
+      -regtest=1
+      -rpcallowip=0.0.0.0/0
+      -rpcbind=0.0.0.0
+      -rpcuser=${BITCOIN_USER}
+      -rpcpassword=${BITCOIN_PASSWORD}
+      -fallbackfee=0.00001
+
+  # mempool
+  web:
+    environment:
+      FRONTEND_HTTP_PORT: "8080"
+      BACKEND_MAINNET_HTTP_HOST: "api"
+    image: mempool/frontend:latest
+    restart: on-failure
+    stop_grace_period: 1m
+    command: "./wait-for db:3306 --timeout=720 -- nginx -g 'daemon off;'"
+    ports:
+      - 8080:8080
+    networks:
+      - internal
+
+  api:
+    environment:
+      MEMPOOL_NETWORK: regtest
+      MEMPOOL_BACKEND: none
+      CORE_RPC_HOST: bitcoin 
+      CORE_RPC_PORT: 18443
+      CORE_RPC_USERNAME: ${BITCOIN_USER}
+      CORE_RPC_PASSWORD: ${BITCOIN_PASSWORD}
+      DATABASE_ENABLED: "true"
+      DATABASE_HOST: db
+      DATABASE_DATABASE: mempool
+      DATABASE_USERNAME: mempool
+      DATABASE_PASSWORD: mempool
+      STATISTICS_ENABLED: true
+    image: mempool/backend:latest
+    restart: on-failure
+    stop_grace_period: 1m
+    command: "./wait-for-it.sh db:3306 --timeout=720 --strict -- ./start.sh"
+    volumes:
+      - mempool-api-data:/backend/cache
+    networks:
+      - internal
+
+  db:
+    environment:
+      MYSQL_DATABASE: mempool
+      MYSQL_USER: mempool
+      MYSQL_PASSWORD: mempool
+      MYSQL_ROOT_PASSWORD: admin
+    image: mariadb:10.5.21
+    restart: on-failure
+    stop_grace_period: 1m
+    volumes:
+      - mempool-db-data:/var/lib/mysql
+    networks:
+      - internal
+
+volumes:
+  bitcoin-regtest-data:
+    driver: local
+  mempool-api-data:
+    driver: local
+  mempool-db-data:
+    driver: local
